@@ -224,6 +224,185 @@ app.get('/api/demand/cities', (req, res) => {
 });
 
 /**
+ * GET /api/demand/all-cities
+ * Get all cities with their crops, categories, and demand data
+ */
+app.get('/api/demand/all-cities', (req, res) => {
+  if (!demandData || demandData.length === 0) {
+    return res.status(503).json({
+      error: 'Data not available',
+      message: 'Demand data has not been loaded. Please run preprocess.js first.'
+    });
+  }
+
+  try {
+    // Create a map to organize data by city
+    const citiesMap = new Map();
+
+    // Iterate through all states
+    demandData.forEach(stateData => {
+      // Iterate through all categories
+      stateData.categories.forEach(category => {
+        // Iterate through all crops
+        category.crops.forEach(crop => {
+          // Iterate through regional suitability to find all cities for this crop
+          crop.regionalSuitability.forEach(region => {
+            const cityName = region.district;
+            const stateName = region.state;
+
+            if (!cityName) return;
+
+            // Get or create city entry
+            if (!citiesMap.has(cityName)) {
+              citiesMap.set(cityName, {
+                city: cityName,
+                states: new Map()
+              });
+            }
+
+            const cityData = citiesMap.get(cityName);
+
+            // Get or create state entry for this city
+            if (!cityData.states.has(stateName)) {
+              cityData.states.set(stateName, {
+                state: stateName,
+                categories: new Map()
+              });
+            }
+
+            const stateDataForCity = cityData.states.get(stateName);
+
+            // Get or create category entry
+            if (!stateDataForCity.categories.has(category.name)) {
+              stateDataForCity.categories.set(category.name, {
+                name: category.name,
+                crops: []
+              });
+            }
+
+            const categoryData = stateDataForCity.categories.get(category.name);
+
+            // Check if crop already exists in this city/state/category
+            const existingCrop = categoryData.crops.find(c => c.cropId === crop.cropId);
+
+            if (!existingCrop) {
+              // Add crop with its data
+              categoryData.crops.push({
+                cropId: crop.cropId,
+                cropName: crop.cropName,
+                scientificName: crop.scientificName,
+                categoryId: crop.categoryId,
+                demandQuantity: crop.demandQuantity,
+                regionalSuitability: [region]
+              });
+            } else {
+              // Add this region to existing crop if not already present
+              const regionExists = existingCrop.regionalSuitability.some(
+                r => r.district === region.district && r.state === region.state
+              );
+              if (!regionExists) {
+                existingCrop.regionalSuitability.push(region);
+              }
+            }
+          });
+        });
+      });
+    });
+
+    // Convert Map structures to arrays
+    const result = {
+      totalCities: citiesMap.size,
+      cities: []
+    };
+
+    citiesMap.forEach((cityData, cityName) => {
+      const cityEntry = {
+        city: cityName,
+        states: []
+      };
+
+      cityData.states.forEach((stateData, stateName) => {
+        const stateEntry = {
+          state: stateName,
+          categories: []
+        };
+
+        stateData.categories.forEach((categoryData, categoryName) => {
+          // Calculate category summary
+          const categorySummary = {
+            name: categoryName,
+            count: categoryData.crops.length,
+            totalDemand: categoryData.crops.reduce(
+              (sum, crop) => sum + crop.demandQuantity,
+              0
+            ),
+            crops: categoryData.crops
+          };
+
+          stateEntry.categories.push(categorySummary);
+        });
+
+        // Calculate state summary
+        const totalCrops = stateEntry.categories.reduce(
+          (sum, cat) => sum + cat.count,
+          0
+        );
+        const totalDemand = stateEntry.categories.reduce(
+          (sum, cat) => sum + cat.totalDemand,
+          0
+        );
+
+        stateEntry.summary = {
+          totalCategories: stateEntry.categories.length,
+          totalCrops: totalCrops,
+          totalDemand: totalDemand,
+          unit: 'tons per week'
+        };
+
+        cityEntry.states.push(stateEntry);
+      });
+
+      // Calculate city summary
+      const cityTotalCrops = cityEntry.states.reduce(
+        (sum, state) => sum + (state.summary?.totalCrops || 0),
+        0
+      );
+      const cityTotalDemand = cityEntry.states.reduce(
+        (sum, state) => sum + (state.summary?.totalDemand || 0),
+        0
+      );
+      const cityTotalCategories = new Set();
+      cityEntry.states.forEach(state => {
+        state.categories.forEach(cat => {
+          cityTotalCategories.add(cat.name);
+        });
+      });
+
+      cityEntry.summary = {
+        totalStates: cityEntry.states.length,
+        totalCategories: cityTotalCategories.size,
+        totalCrops: cityTotalCrops,
+        totalDemand: cityTotalDemand,
+        unit: 'tons per week'
+      };
+
+      result.cities.push(cityEntry);
+    });
+
+    // Sort cities alphabetically
+    result.cities.sort((a, b) => a.city.localeCompare(b.city));
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error fetching all cities data:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'An error occurred while fetching all cities data'
+    });
+  }
+});
+
+/**
  * Health check endpoint
  */
 app.get('/health', (req, res) => {
@@ -240,6 +419,7 @@ app.listen(PORT, () => {
   console.log(`📊 Endpoints available:`);
   console.log(`   GET /api/demand/city/:cityName - Get crop demand by city`);
   console.log(`   GET /api/demand/cities - Get list of all cities`);
+  console.log(`   GET /api/demand/all-cities - Get all cities with crops, categories, and demand`);
   console.log(`   GET /health - Health check`);
 });
 

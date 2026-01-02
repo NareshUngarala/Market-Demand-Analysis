@@ -1,0 +1,25 @@
+{
+  "name": "csv-preprocessor",
+  "version": "1.0.0",
+  "description": "Preprocess and merge CSV files into JSON format",
+  "main": "preprocess.js",
+  "scripts": {
+    "start": "node preprocess.js",
+    "preprocess": "node preprocess.js",
+    "server": "node server.js"
+  },
+  "keywords": [
+    "csv",
+    "preprocessing",
+    "json"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "uuid": "^9.0.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
+

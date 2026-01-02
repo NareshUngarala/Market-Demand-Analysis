@@ -285,23 +285,26 @@ app.get('/api/demand/all-cities', (req, res) => {
             // Check if crop already exists in this city/state/category
             const existingCrop = categoryData.crops.find(c => c.cropId === crop.cropId);
 
-            if (!existingCrop) {
-              // Add crop with its data
-              categoryData.crops.push({
-                cropId: crop.cropId,
-                cropName: crop.cropName,
-                scientificName: crop.scientificName,
-                categoryId: crop.categoryId,
-                demandQuantity: crop.demandQuantity,
-                regionalSuitability: [region]
-              });
-            } else {
-              // Add this region to existing crop if not already present
-              const regionExists = existingCrop.regionalSuitability.some(
-                r => r.district === region.district && r.state === region.state
-              );
-              if (!regionExists) {
-                existingCrop.regionalSuitability.push(region);
+            // Only add crops with demand quantity greater than 0
+            if (crop.demandQuantity > 0) {
+              if (!existingCrop) {
+                // Add crop with its data
+                categoryData.crops.push({
+                  cropId: crop.cropId,
+                  cropName: crop.cropName,
+                  scientificName: crop.scientificName,
+                  categoryId: crop.categoryId,
+                  demandQuantity: crop.demandQuantity,
+                  regionalSuitability: [region]
+                });
+              } else {
+                // Add this region to existing crop if not already present
+                const regionExists = existingCrop.regionalSuitability.some(
+                  r => r.district === region.district && r.state === region.state
+                );
+                if (!regionExists) {
+                  existingCrop.regionalSuitability.push(region);
+                }
               }
             }
           });
@@ -328,65 +331,77 @@ app.get('/api/demand/all-cities', (req, res) => {
         };
 
         stateData.categories.forEach((categoryData, categoryName) => {
-          // Calculate category summary
-          const categorySummary = {
-            name: categoryName,
-            count: categoryData.crops.length,
-            totalDemand: categoryData.crops.reduce(
-              (sum, crop) => sum + crop.demandQuantity,
-              0
-            ),
-            crops: categoryData.crops
-          };
+          // Filter out crops with 0 demand (should already be filtered, but double-check)
+          const validCrops = categoryData.crops.filter(crop => crop.demandQuantity > 0);
+          
+          // Only add category if it has crops with demand > 0
+          if (validCrops.length > 0) {
+            // Calculate category summary
+            const categorySummary = {
+              name: categoryName,
+              count: validCrops.length,
+              totalDemand: validCrops.reduce(
+                (sum, crop) => sum + crop.demandQuantity,
+                0
+              ),
+              crops: validCrops
+            };
 
-          stateEntry.categories.push(categorySummary);
+            stateEntry.categories.push(categorySummary);
+          }
         });
 
-        // Calculate state summary
-        const totalCrops = stateEntry.categories.reduce(
-          (sum, cat) => sum + cat.count,
-          0
-        );
-        const totalDemand = stateEntry.categories.reduce(
-          (sum, cat) => sum + cat.totalDemand,
-          0
-        );
+        // Only add state if it has categories with crops
+        if (stateEntry.categories.length > 0) {
+          // Calculate state summary
+          const totalCrops = stateEntry.categories.reduce(
+            (sum, cat) => sum + cat.count,
+            0
+          );
+          const totalDemand = stateEntry.categories.reduce(
+            (sum, cat) => sum + cat.totalDemand,
+            0
+          );
 
-        stateEntry.summary = {
-          totalCategories: stateEntry.categories.length,
-          totalCrops: totalCrops,
-          totalDemand: totalDemand,
+          stateEntry.summary = {
+            totalCategories: stateEntry.categories.length,
+            totalCrops: totalCrops,
+            totalDemand: totalDemand,
+            unit: 'tons per week'
+          };
+
+          cityEntry.states.push(stateEntry);
+        }
+      });
+
+      // Only add city if it has states with crops
+      if (cityEntry.states.length > 0) {
+        // Calculate city summary
+        const cityTotalCrops = cityEntry.states.reduce(
+          (sum, state) => sum + (state.summary?.totalCrops || 0),
+          0
+        );
+        const cityTotalDemand = cityEntry.states.reduce(
+          (sum, state) => sum + (state.summary?.totalDemand || 0),
+          0
+        );
+        const cityTotalCategories = new Set();
+        cityEntry.states.forEach(state => {
+          state.categories.forEach(cat => {
+            cityTotalCategories.add(cat.name);
+          });
+        });
+
+        cityEntry.summary = {
+          totalStates: cityEntry.states.length,
+          totalCategories: cityTotalCategories.size,
+          totalCrops: cityTotalCrops,
+          totalDemand: cityTotalDemand,
           unit: 'tons per week'
         };
 
-        cityEntry.states.push(stateEntry);
-      });
-
-      // Calculate city summary
-      const cityTotalCrops = cityEntry.states.reduce(
-        (sum, state) => sum + (state.summary?.totalCrops || 0),
-        0
-      );
-      const cityTotalDemand = cityEntry.states.reduce(
-        (sum, state) => sum + (state.summary?.totalDemand || 0),
-        0
-      );
-      const cityTotalCategories = new Set();
-      cityEntry.states.forEach(state => {
-        state.categories.forEach(cat => {
-          cityTotalCategories.add(cat.name);
-        });
-      });
-
-      cityEntry.summary = {
-        totalStates: cityEntry.states.length,
-        totalCategories: cityTotalCategories.size,
-        totalCrops: cityTotalCrops,
-        totalDemand: cityTotalDemand,
-        unit: 'tons per week'
-      };
-
-      result.cities.push(cityEntry);
+        result.cities.push(cityEntry);
+      }
     });
 
     // Sort cities alphabetically
